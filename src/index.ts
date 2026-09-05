@@ -381,6 +381,42 @@ async function githubRepo(url:string):Promise<FileMap> {
   return filterGithubZip(new Uint8Array(await resp.arrayBuffer()), subdir);
 }
 
+function filterZipFiles(bytes:Uint8Array):FileMap {
+  const raw = unzipSync(bytes);
+  const out:FileMap = {};
+  for (const [name,data] of Object.entries(raw)) {
+    if (!name.endsWith("/") && safePath(name)) out[name] = data;
+  }
+  return out;
+}
+
+async function clawHubSkill(url:string):Promise<FileMap> {
+  const u = new URL(url);
+  if (u.protocol !== "https:" || u.hostname.toLowerCase() !== "clawhub.ai") {
+    throw new Error("ClawHub URL 必须来自 https://clawhub.ai");
+  }
+  const parts = u.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+  const [ownerHandle, kind, slug] = parts;
+  if (parts.length !== 3 || kind !== "skills" || !ownerHandle || !slug) {
+    throw new Error("ClawHub URL 格式应为 https://clawhub.ai/<发布者>/skills/<技能名>");
+  }
+  const download = new URL("https://clawhub.ai/api/v1/download");
+  download.searchParams.set("slug", slug);
+  download.searchParams.set("ownerHandle", ownerHandle);
+  const resp = await fetch(download, {headers:{"user-agent":"openclaw-skill-extractor"}});
+  if (!resp.ok) throw new Error(`ClawHub 下载失败: ${resp.status}`);
+  const type = resp.headers.get("content-type") || "";
+  if (!type.includes("application/zip")) throw new Error("ClawHub 返回的不是技能 ZIP 文件");
+  return filterZipFiles(new Uint8Array(await resp.arrayBuffer()));
+}
+
+async function urlRepo(url:string):Promise<FileMap> {
+  const hostname = new URL(url).hostname.toLowerCase();
+  if (hostname === "github.com") return githubRepo(url);
+  if (hostname === "clawhub.ai") return clawHubSkill(url);
+  throw new Error("URL 导入仅支持公开 GitHub 仓库或 ClawHub Skill 页面");
+}
+
 function filterGithubZip(bytes:Uint8Array, subdir:string):FileMap {
   const raw = unzipSync(bytes);
   const out:FileMap = {};
@@ -425,7 +461,7 @@ export default {
         if (ct.includes("application/json")) {
           const body:any = await request.json();
           if (!body.url) return json({error:"缺少 url"},400);
-          files = await githubRepo(body.url);
+          files = await urlRepo(body.url);
         } else {
           const bytes = new Uint8Array(await request.arrayBuffer());
           files = unzipSync(bytes);
@@ -437,7 +473,7 @@ export default {
         let files:FileMap = {};
         if (ct.includes("application/json")) {
           const body:any = await request.json();
-          files = await githubRepo(body.url);
+          files = await urlRepo(body.url);
         } else files = unzipSync(new Uint8Array(await request.arrayBuffer()));
         return new Response(extractedZip(files), {
           headers:{

@@ -8,6 +8,7 @@ https://openclaw-skill-extractor.sj9292008133.workers.dev
 
 ## 能做什么
 - 输入公开 GitHub 仓库或 `tree/<branch>/<path>` URL
+- 输入 ClawHub Skill URL（例如 `https://clawhub.ai/apidojo-io/skills/instagram-scraper`）
 - 上传 ZIP
 - 自动发现所有 `SKILL.md`
 - 解析 YAML frontmatter
@@ -34,7 +35,7 @@ npm run deploy
 ## 安全设计
 此版本只“读取和静态分析”，不会执行任何 Skill 脚本。
 不要在网页中执行上传 Skill 的 shell/Python/JS。
-公开 GitHub 下载使用 codeload；私有仓库尚未接 GitHub OAuth。
+公开 GitHub 下载使用 codeload；ClawHub 使用其公开下载接口；私有仓库尚未接 GitHub OAuth。
 
 
 ## 安全审计
