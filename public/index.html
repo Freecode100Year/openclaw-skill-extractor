@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OpenClaw Skill 拆解器</title>
+<style>
+:root{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#e8e8e8;background:#090b0f}
+*{box-sizing:border-box} body{margin:0}.wrap{max-width:1050px;margin:auto;padding:32px 18px}
+h1{font-size:32px;margin:0 0 8px}.muted{color:#8c97a8}.card{border:1px solid #242a33;background:#10141a;border-radius:14px;padding:18px;margin:18px 0}
+.row{display:flex;gap:10px;flex-wrap:wrap}input{flex:1;min-width:280px;background:#090b0f;color:#fff;border:1px solid #303844;border-radius:9px;padding:12px}
+button,.file{background:#eee;color:#111;border:0;border-radius:9px;padding:11px 15px;font:inherit;cursor:pointer}.secondary{background:#1c2430;color:#fff}
+pre{white-space:pre-wrap;overflow:auto;background:#080a0d;border-radius:8px;padding:12px;font-size:12px}
+.skill{border-top:1px solid #252b35;padding:14px 0}.tag{display:inline-block;padding:2px 7px;background:#1b2330;border-radius:999px;margin:2px;font-size:12px}
+.error{color:#ff8a8a}details{margin:8px 0}a{color:#a8c7ff}
+</style></head>
+<body><main class="wrap">
+<h1>OpenClaw Skill 拆解器</h1>
+<div class="muted">GitHub / ZIP → 识别 SKILL.md → 拆指令 → 提取脚本 → 环境变量 → 一键导出</div>
+<section class="card">
+  <div class="row"><input id="url" placeholder="https://github.com/owner/repo 或 /tree/main/path">
+  <button onclick="analyzeUrl()">分析 GitHub</button></div>
+  <div style="height:10px"></div>
+  <div class="row"><label class="file">选择 Skill ZIP<input id="zip" type="file" accept=".zip" hidden onchange="analyzeZip(this.files[0])"></label>
+  <button class="secondary" id="extract" disabled onclick="extract()">导出拆解包 ZIP</button></div>
+</section>
+<div id="status" class="muted"></div><section id="result" class="card" hidden></section>
+<script>
+let source=null;
+const $=id=>document.getElementById(id);
+const esc=s=>(s??"").toString().replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+async function post(body,isJson=false,path="/api/analyze"){
+  $("status").textContent="处理中…"; $("result").hidden=true;
+  const r=await fetch(path,{method:"POST",headers:isJson?{"content-type":"application/json"}:{},body:isJson?JSON.stringify(body):body});
+  if(!r.ok){let x=await r.json().catch(()=>({error:r.statusText}));throw Error(x.error)}
+  return r;
+}
+async function analyzeUrl(){
+  try{const url=$("url").value.trim();source={type:"url",value:url};render(await (await post({url},true)).json())}
+  catch(e){$("status").innerHTML='<span class="error">'+esc(e.message)+'</span>'}
+}
+async function analyzeZip(file){
+  if(!file)return; try{source={type:"zip",value:file};render(await (await post(file)).json())}
+  catch(e){$("status").innerHTML='<span class="error">'+esc(e.message)+'</span>'}
+}
+function render(data){
+ $("status").textContent=`发现 ${data.skillCount} 个 Skill，共 ${data.totalFiles} 个文件`;
+ $("extract").disabled=!data.skillCount; const box=$("result"); box.hidden=false;
+ const sec=data.security||{};
+ box.innerHTML=`<h2>安全审计：${esc((sec.level||"unknown").toUpperCase())}</h2>
+ <p><span class=tag>风险分 ${esc(sec.score??0)}/100</span>
+ <span class=tag>决策 ${esc(sec.decision||"")}</span>
+ <span class=tag>发现 ${esc(sec.findingCount??0)}</span></p>
+ <details open><summary>安全发现</summary>${(sec.findings||[]).map(f=>`<div class=skill>
+ <b>[${esc(f.severity.toUpperCase())}] ${esc(f.rule)}</b>
+ <div class=muted>${esc(f.file)}:${esc(f.line||"")} · ${esc(f.category)}</div>
+ <pre>${esc(f.evidence)}</pre><div>${esc(f.recommendation)}</div></div>`).join("")||"<p>未命中已知危险规则。注意：这不等于安全认证。</p>"}</details>
+ <details><summary>Skill → 脚本入口 (${sec.callGraph?.entrypoints?.length||0})</summary><pre>${esc((sec.callGraph?.entrypoints||[]).map(e=>`${e.resolved?"✓":"⚠"} ${e.skillFile}:${e.line} → ${e.target}`).join("\n")||"未检测到显式脚本入口")}</pre></details>
+ <details><summary>脚本调用边 (${sec.callGraph?.edges?.length||0})</summary><pre>${esc((sec.callGraph?.edges||[]).map(e=>`${e.resolved?"✓":"⚠"} ${e.from}:${e.line} → ${e.to} [${e.kind}]`).join("\n")||"未检测到脚本间调用")}</pre></details>
+ <details><summary>完整调用链 (${sec.callGraph?.chains?.length||0})</summary><pre>${esc((sec.callGraph?.chains||[]).map(c=>`${c.cycle?"[cycle] ":""}${c.path.join(" → ")}`).join("\n")||"未形成可解析调用链")}</pre></details>
+ <details><summary>外部域名 (${(sec.externalDomains||[]).length})</summary><pre>${esc((sec.externalDomains||[]).join("\n")||"未检测到")}</pre></details>
+ <details><summary>安全边界</summary><pre>${esc((sec.guarantees||[]).join("\n"))}</pre></details>`+
+ (data.warnings||[]).map(x=>`<div class=error>${esc(x)}</div>`).join("")+
+ data.skills.map(s=>`<article class=skill>
+ <h2>${esc(s.name)}</h2><div>${esc(s.description)}</div>
+ <p><span class=tag>${esc(s.skillFile)}</span> ${s.scripts.map(x=>`<span class=tag>script: ${esc(x.path)}</span>`).join("")}</p>
+ <details open><summary>Frontmatter</summary><pre>${esc(JSON.stringify(s.frontmatter,null,2))}</pre></details>
+ <details><summary>环境变量 (${s.environmentVariables.length})</summary><pre>${esc(s.environmentVariables.join("\n")||"未检测到")}</pre></details>
+ <details><summary>Shell 命令 (${s.shellCommands.length})</summary><pre>${esc(s.shellCommands.join("\n")||"未检测到")}</pre></details>
+ <details><summary>指令正文</summary><pre>${esc(s.instructionBody)}</pre></details>
+ <details><summary>脚本文件 (${s.scripts.length})</summary>${s.scripts.map(x=>`<b>${esc(x.path)}</b><pre>${esc(x.content??"[binary]")}</pre>`).join("")}</details>
+ </article>`).join("");
+}
+async function extract(){
+ if(!source)return;
+ try{
+   let r=source.type==="url"?await post({url:source.value},true,"/api/extract"):await post(source.value,false,"/api/extract");
+   const b=await r.blob(),a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="openclaw-skill-extracted.zip";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)
+ }catch(e){$("status").innerHTML='<span class="error">'+esc(e.message)+'</span>'}
+}
+</script></main></body></html>
