@@ -2,6 +2,10 @@
 
 Cloudflare Worker + Static Assets 网页工具。
 
+## 在线使用
+
+https://openclaw-skill-extractor.sj9292008133.workers.dev
+
 ## 能做什么
 - 输入公开 GitHub 仓库或 `tree/<branch>/<path>` URL
 - 上传 ZIP
